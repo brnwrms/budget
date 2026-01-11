@@ -8,6 +8,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont
 import requests
@@ -29,9 +30,13 @@ HEIGHT = 1448
 # E-ink paper gray background
 BG_COLOR = (232, 232, 232)
 
+# Timezone for calculations
+TIMEZONE = ZoneInfo('America/Los_Angeles')
+
 # Categories to exclude (transfers, income, etc.)
+# Note: Actual credit card purchases should NOT be excluded
 EXCLUDED_CATEGORIES = [
-    'Transfer', 'Credit Card', 'Deposit', 'Payment', 
+    'Transfer', 'Deposit', 'Payment', 
     'Bank Fees', 'Interest', 'Tax'
 ]
 
@@ -63,7 +68,7 @@ def get_plaid_client():
 
 def fetch_transactions(client, access_token, days=35):
     """Fetch transactions from Plaid for the specified number of days."""
-    end_date = datetime.now().date()
+    end_date = datetime.now(TIMEZONE).date()
     start_date = end_date - timedelta(days=days)
     
     request = TransactionsGetRequest(
@@ -79,7 +84,7 @@ def fetch_transactions(client, access_token, days=35):
 
 def calculate_spending(transactions):
     """Calculate spending totals for day, week, and month."""
-    today = datetime.now().date()
+    today = datetime.now(TIMEZONE).date()
     
     # Week starts on Monday
     days_since_monday = today.weekday()
