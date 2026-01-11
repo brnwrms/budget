@@ -94,7 +94,7 @@ def calculate_spending(transactions):
     
     for txn in transactions:
         # Skip excluded categories
-        category = txn.get('category', [])
+        category = txn.get('category') or []
         if any(exc in cat for cat in category for exc in EXCLUDED_CATEGORIES):
             continue
         
