@@ -143,7 +143,7 @@ def download_font(url, path):
     if not path.exists():
         print(f"Downloading font to {path}...")
         try:
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
             response.raise_for_status()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(response.content)
@@ -158,62 +158,68 @@ def download_font(url, path):
 def generate_image(spending, output_path='display.png'):
     """Generate the Kindle display image."""
     
-    # Font setup - using EB Garamond from Google Fonts CDN
+    # Font setup
     font_dir = Path(__file__).parent / 'fonts'
     font_dir.mkdir(exist_ok=True)
     
-    font_path = font_dir / 'EBGaramond-Regular.ttf'
-    font_medium_path = font_dir / 'EBGaramond-Medium.ttf'
-    font_semibold_path = font_dir / 'EBGaramond-SemiBold.ttf'
+    # Try to download Cormorant Garamond (the original design font)
+    font_path = font_dir / 'CormorantGaramond-Regular.ttf'
+    font_medium_path = font_dir / 'CormorantGaramond-Medium.ttf'
+    font_semibold_path = font_dir / 'CormorantGaramond-SemiBold.ttf'
     
-    # More reliable Google Fonts CDN URLs
-    font_urls = {
-        'regular': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-6_RkC49_S6w.ttf",
-        'medium': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-2fRkC49_S6w.ttf",
-        'semibold': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-NfNkC49_S6w.ttf",
-    }
+    # Cormorant Garamond from Google Fonts
+    base_url = "https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond"
+    download_font(f"{base_url}/CormorantGaramond-Regular.ttf", font_path)
+    download_font(f"{base_url}/CormorantGaramond-Medium.ttf", font_medium_path)
+    download_font(f"{base_url}/CormorantGaramond-SemiBold.ttf", font_semibold_path)
     
-    # Try downloading fonts
-    download_font(font_urls['regular'], font_path)
-    download_font(font_urls['medium'], font_medium_path)
-    download_font(font_urls['semibold'], font_semibold_path)
+    # Font sizes - elegant progression
+    LABEL_SIZE = 36
+    SMALL_SIZE = 80
+    MEDIUM_SIZE = 115
+    LARGE_SIZE = 200
     
-    # Load fonts at different sizes - BIGGER SIZES
+    # Load fonts
     font_label = None
     font_small = None
     font_medium = None
     font_large = None
     
+    # Try Cormorant Garamond first
     try:
         if font_path.exists():
-            font_label = ImageFont.truetype(str(font_path), 48)
-            font_small = ImageFont.truetype(str(font_path), 120)
+            font_label = ImageFont.truetype(str(font_path), LABEL_SIZE)
+            font_small = ImageFont.truetype(str(font_path), SMALL_SIZE)
         if font_medium_path.exists():
-            font_medium = ImageFont.truetype(str(font_medium_path), 160)
+            font_medium = ImageFont.truetype(str(font_medium_path), MEDIUM_SIZE)
         if font_semibold_path.exists():
-            font_large = ImageFont.truetype(str(font_semibold_path), 280)
+            font_large = ImageFont.truetype(str(font_semibold_path), LARGE_SIZE)
+        print("Loaded Cormorant Garamond fonts")
     except Exception as e:
-        print(f"Font loading error: {e}")
+        print(f"Cormorant loading error: {e}")
     
-    # Fallback to DejaVu Sans (pre-installed on Ubuntu)
+    # Fallback to Liberation Serif (nice serif font on Ubuntu)
     if font_label is None:
         try:
-            # Try system fonts on Ubuntu
-            for font_name in ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 
-                              '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf']:
+            serif_paths = [
+                '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
+                '/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf',
+                '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf',
+            ]
+            for font_name in serif_paths:
                 if Path(font_name).exists():
                     print(f"Using system font: {font_name}")
-                    font_label = ImageFont.truetype(font_name, 48)
-                    font_small = ImageFont.truetype(font_name, 120)
-                    font_medium = ImageFont.truetype(font_name, 160)
-                    font_large = ImageFont.truetype(font_name, 280)
+                    font_label = ImageFont.truetype(font_name, LABEL_SIZE)
+                    font_small = ImageFont.truetype(font_name, SMALL_SIZE)
+                    font_medium = ImageFont.truetype(font_name, MEDIUM_SIZE)
+                    font_large = ImageFont.truetype(font_name, LARGE_SIZE)
                     break
         except Exception as e:
             print(f"System font loading failed: {e}")
     
-    # Final fallback - use default but warn
+    # Final fallback
     if font_label is None:
-        print("WARNING: Using default font - text will be small!")
+        print("WARNING: Using default font!")
         font_label = ImageFont.load_default()
         font_small = font_label
         font_medium = font_label
@@ -228,20 +234,20 @@ def generate_image(spending, output_path='display.png'):
         font_large = font_medium
     
     # Create base image
-    img = Image.new('L', (WIDTH, HEIGHT), color=232)  # Grayscale, e-ink gray
+    img = Image.new('L', (WIDTH, HEIGHT), color=232)
     draw = ImageDraw.Draw(img)
     
     # Colors (grayscale values)
-    LABEL_COLOR = 140  # Light gray for labels
-    SMALL_COLOR = 80   # Day amount
-    MEDIUM_COLOR = 50  # Week amount
+    LABEL_COLOR = 150  # Light gray for labels
+    SMALL_COLOR = 100  # Day amount
+    MEDIUM_COLOR = 60  # Week amount
     LARGE_COLOR = 0    # Month amount (black)
     
     # Layout - centered, vertical stack
     center_x = WIDTH // 2
     
-    # Calculate vertical positions
-    start_y = 280
+    # Vertical positions
+    start_y = 340
     
     # Day
     day_label = "DAY"
@@ -253,10 +259,10 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), day_amount, font=font_small)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, start_y + 55), day_amount, font=font_small, fill=SMALL_COLOR)
+    draw.text((center_x - amount_width // 2, start_y + 45), day_amount, font=font_small, fill=SMALL_COLOR)
     
     # Week
-    week_y = start_y + 220
+    week_y = start_y + 170
     week_label = "WEEK"
     week_amount = format_amount(spending['week'])
     
@@ -266,10 +272,10 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), week_amount, font=font_medium)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, week_y + 55), week_amount, font=font_medium, fill=MEDIUM_COLOR)
+    draw.text((center_x - amount_width // 2, week_y + 45), week_amount, font=font_medium, fill=MEDIUM_COLOR)
     
     # Month
-    month_y = start_y + 480
+    month_y = start_y + 380
     month_label = "MONTH"
     month_amount = format_amount(spending['month'])
     
@@ -279,7 +285,7 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), month_amount, font=font_large)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, month_y + 60), month_amount, font=font_large, fill=LARGE_COLOR)
+    draw.text((center_x - amount_width // 2, month_y + 50), month_amount, font=font_large, fill=LARGE_COLOR)
     
     # Add character image at bottom center
     char_path = Path(__file__).parent / 'assets' / 'character.png'
@@ -287,45 +293,41 @@ def generate_image(spending, output_path='display.png'):
         try:
             char_img = Image.open(char_path).convert('RGBA')
             
-            # Resize character (scale to ~400px height)
-            char_height = 400
+            # Resize character
+            char_height = 350
             aspect = char_img.width / char_img.height
             char_width = int(char_height * aspect)
             char_img = char_img.resize((char_width, char_height), Image.Resampling.LANCZOS)
             
             # Convert to grayscale and apply 25% opacity
             char_gray = char_img.convert('L')
-            char_alpha = char_img.split()[3]  # Get alpha channel
-            
-            # Reduce alpha to 25%
+            char_alpha = char_img.split()[3]
             char_alpha = char_alpha.point(lambda x: int(x * 0.25))
             
-            # Position at bottom center, flush with bottom edge
+            # Position at bottom center
             char_x = (WIDTH - char_width) // 2
-            char_y = HEIGHT - char_height + 40
+            char_y = HEIGHT - char_height + 32
             
-            # Create a temporary RGBA image to composite
+            # Composite
             temp = Image.new('RGBA', (WIDTH, HEIGHT), (232, 232, 232, 255))
             char_rgba = Image.merge('RGBA', (char_gray, char_gray, char_gray, char_alpha))
             temp.paste(char_rgba, (char_x, char_y), char_rgba)
             
-            # Composite onto main image
             img = Image.alpha_composite(
                 Image.merge('RGBA', (img, img, img, Image.new('L', img.size, 255))),
                 temp
             ).convert('L')
             
-            # Redraw text on top (recreate draw object)
+            # Redraw text on top
             draw = ImageDraw.Draw(img)
             
-            # Redraw all text
             bbox = draw.textbbox((0, 0), day_label, font=font_label)
             label_width = bbox[2] - bbox[0]
             draw.text((center_x - label_width // 2, start_y), day_label, font=font_label, fill=LABEL_COLOR)
             
             bbox = draw.textbbox((0, 0), day_amount, font=font_small)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, start_y + 55), day_amount, font=font_small, fill=SMALL_COLOR)
+            draw.text((center_x - amount_width // 2, start_y + 45), day_amount, font=font_small, fill=SMALL_COLOR)
             
             bbox = draw.textbbox((0, 0), week_label, font=font_label)
             label_width = bbox[2] - bbox[0]
@@ -333,7 +335,7 @@ def generate_image(spending, output_path='display.png'):
             
             bbox = draw.textbbox((0, 0), week_amount, font=font_medium)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, week_y + 55), week_amount, font=font_medium, fill=MEDIUM_COLOR)
+            draw.text((center_x - amount_width // 2, week_y + 45), week_amount, font=font_medium, fill=MEDIUM_COLOR)
             
             bbox = draw.textbbox((0, 0), month_label, font=font_label)
             label_width = bbox[2] - bbox[0]
@@ -341,7 +343,7 @@ def generate_image(spending, output_path='display.png'):
             
             bbox = draw.textbbox((0, 0), month_amount, font=font_large)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, month_y + 60), month_amount, font=font_large, fill=LARGE_COLOR)
+            draw.text((center_x - amount_width // 2, month_y + 50), month_amount, font=font_large, fill=LARGE_COLOR)
             
         except Exception as e:
             print(f"Could not load character image: {e}")
@@ -354,7 +356,6 @@ def generate_image(spending, output_path='display.png'):
 
 def main():
     """Main entry point."""
-    # Check for required environment variables
     required_vars = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ACCESS_TOKEN']
     missing = [v for v in required_vars if not os.getenv(v)]
     
@@ -366,7 +367,6 @@ def main():
         print("Generating demo image with sample data...")
         spending = {'day': 42, 'week': 412, 'month': 2847}
     else:
-        # Fetch real data
         client = get_plaid_client()
         access_token = os.getenv('PLAID_ACCESS_TOKEN')
         
@@ -377,10 +377,12 @@ def main():
         spending = calculate_spending(transactions)
         print(f"Spending: Day=${spending['day']:.2f}, Week=${spending['week']:.2f}, Month=${spending['month']:.2f}")
     
-    # Generate image
     output_path = Path(__file__).parent / 'display.png'
     generate_image(spending, output_path)
 
+
+if __name__ == '__main__':
+    main()
 
 if __name__ == '__main__':
     main()
