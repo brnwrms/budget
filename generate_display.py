@@ -143,10 +143,12 @@ def download_font(url, path):
     if not path.exists():
         print(f"Downloading font to {path}...")
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=30)
             response.raise_for_status()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(response.content)
+            print(f"Successfully downloaded {path.name}")
+            return True
         except Exception as e:
             print(f"Could not download font: {e}")
             return False
@@ -156,47 +158,90 @@ def download_font(url, path):
 def generate_image(spending, output_path='display.png'):
     """Generate the Kindle display image."""
     
-    # Font setup - using EB Garamond as a free alternative to Cormorant
+    # Font setup - using EB Garamond from Google Fonts CDN
     font_dir = Path(__file__).parent / 'fonts'
+    font_dir.mkdir(exist_ok=True)
+    
     font_path = font_dir / 'EBGaramond-Regular.ttf'
     font_medium_path = font_dir / 'EBGaramond-Medium.ttf'
     font_semibold_path = font_dir / 'EBGaramond-SemiBold.ttf'
     
-    # Download fonts if needed (EB Garamond from Google Fonts)
-    base_url = "https://github.com/googlefonts/eb-garamond/raw/main/fonts/ttf"
-    download_font(f"{base_url}/EBGaramond-Regular.ttf", font_path)
-    download_font(f"{base_url}/EBGaramond-Medium.ttf", font_medium_path)
-    download_font(f"{base_url}/EBGaramond-SemiBold.ttf", font_semibold_path)
+    # More reliable Google Fonts CDN URLs
+    font_urls = {
+        'regular': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-6_RkC49_S6w.ttf",
+        'medium': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-2fRkC49_S6w.ttf",
+        'semibold': "https://fonts.gstatic.com/s/ebgaramond/v27/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-NfNkC49_S6w.ttf",
+    }
     
-    # Load fonts at different sizes
+    # Try downloading fonts
+    download_font(font_urls['regular'], font_path)
+    download_font(font_urls['medium'], font_medium_path)
+    download_font(font_urls['semibold'], font_semibold_path)
+    
+    # Load fonts at different sizes - BIGGER SIZES
+    font_label = None
+    font_small = None
+    font_medium = None
+    font_large = None
+    
     try:
-        font_label = ImageFont.truetype(str(font_path), 28)
-        font_small = ImageFont.truetype(str(font_path), 72)
-        font_medium = ImageFont.truetype(str(font_medium_path), 108)
-        font_large = ImageFont.truetype(str(font_semibold_path), 200)
+        if font_path.exists():
+            font_label = ImageFont.truetype(str(font_path), 48)
+            font_small = ImageFont.truetype(str(font_path), 120)
+        if font_medium_path.exists():
+            font_medium = ImageFont.truetype(str(font_medium_path), 160)
+        if font_semibold_path.exists():
+            font_large = ImageFont.truetype(str(font_semibold_path), 280)
     except Exception as e:
-        print(f"Font loading failed: {e}, using default")
+        print(f"Font loading error: {e}")
+    
+    # Fallback to DejaVu Sans (pre-installed on Ubuntu)
+    if font_label is None:
+        try:
+            # Try system fonts on Ubuntu
+            for font_name in ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 
+                              '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf']:
+                if Path(font_name).exists():
+                    print(f"Using system font: {font_name}")
+                    font_label = ImageFont.truetype(font_name, 48)
+                    font_small = ImageFont.truetype(font_name, 120)
+                    font_medium = ImageFont.truetype(font_name, 160)
+                    font_large = ImageFont.truetype(font_name, 280)
+                    break
+        except Exception as e:
+            print(f"System font loading failed: {e}")
+    
+    # Final fallback - use default but warn
+    if font_label is None:
+        print("WARNING: Using default font - text will be small!")
         font_label = ImageFont.load_default()
         font_small = font_label
         font_medium = font_label
         font_large = font_label
+    
+    # Fill in any missing fonts
+    if font_small is None:
+        font_small = font_label
+    if font_medium is None:
+        font_medium = font_small
+    if font_large is None:
+        font_large = font_medium
     
     # Create base image
     img = Image.new('L', (WIDTH, HEIGHT), color=232)  # Grayscale, e-ink gray
     draw = ImageDraw.Draw(img)
     
     # Colors (grayscale values)
-    LABEL_COLOR = 120  # Light gray for labels
-    SMALL_COLOR = 100  # Day amount
-    MEDIUM_COLOR = 70  # Week amount
+    LABEL_COLOR = 140  # Light gray for labels
+    SMALL_COLOR = 80   # Day amount
+    MEDIUM_COLOR = 50  # Week amount
     LARGE_COLOR = 0    # Month amount (black)
     
     # Layout - centered, vertical stack
     center_x = WIDTH // 2
     
-    # Calculate vertical positions (centered with spacing)
-    total_content_height = 500  # approximate
-    start_y = (HEIGHT - total_content_height) // 2 - 60
+    # Calculate vertical positions
+    start_y = 280
     
     # Day
     day_label = "DAY"
@@ -208,10 +253,10 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), day_amount, font=font_small)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, start_y + 35), day_amount, font=font_small, fill=SMALL_COLOR)
+    draw.text((center_x - amount_width // 2, start_y + 55), day_amount, font=font_small, fill=SMALL_COLOR)
     
     # Week
-    week_y = start_y + 150
+    week_y = start_y + 220
     week_label = "WEEK"
     week_amount = format_amount(spending['week'])
     
@@ -221,10 +266,10 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), week_amount, font=font_medium)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, week_y + 35), week_amount, font=font_medium, fill=MEDIUM_COLOR)
+    draw.text((center_x - amount_width // 2, week_y + 55), week_amount, font=font_medium, fill=MEDIUM_COLOR)
     
     # Month
-    month_y = start_y + 330
+    month_y = start_y + 480
     month_label = "MONTH"
     month_amount = format_amount(spending['month'])
     
@@ -234,7 +279,7 @@ def generate_image(spending, output_path='display.png'):
     
     bbox = draw.textbbox((0, 0), month_amount, font=font_large)
     amount_width = bbox[2] - bbox[0]
-    draw.text((center_x - amount_width // 2, month_y + 40), month_amount, font=font_large, fill=LARGE_COLOR)
+    draw.text((center_x - amount_width // 2, month_y + 60), month_amount, font=font_large, fill=LARGE_COLOR)
     
     # Add character image at bottom center
     char_path = Path(__file__).parent / 'assets' / 'character.png'
@@ -242,8 +287,8 @@ def generate_image(spending, output_path='display.png'):
         try:
             char_img = Image.open(char_path).convert('RGBA')
             
-            # Resize character (scale to ~320px height for Kindle resolution)
-            char_height = 320
+            # Resize character (scale to ~400px height)
+            char_height = 400
             aspect = char_img.width / char_img.height
             char_width = int(char_height * aspect)
             char_img = char_img.resize((char_width, char_height), Image.Resampling.LANCZOS)
@@ -255,9 +300,9 @@ def generate_image(spending, output_path='display.png'):
             # Reduce alpha to 25%
             char_alpha = char_alpha.point(lambda x: int(x * 0.25))
             
-            # Position at bottom center, flush with bottom edge (actually -32px below)
+            # Position at bottom center, flush with bottom edge
             char_x = (WIDTH - char_width) // 2
-            char_y = HEIGHT - char_height + 32  # Push down so bottom is cut off
+            char_y = HEIGHT - char_height + 40
             
             # Create a temporary RGBA image to composite
             temp = Image.new('RGBA', (WIDTH, HEIGHT), (232, 232, 232, 255))
@@ -280,7 +325,7 @@ def generate_image(spending, output_path='display.png'):
             
             bbox = draw.textbbox((0, 0), day_amount, font=font_small)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, start_y + 35), day_amount, font=font_small, fill=SMALL_COLOR)
+            draw.text((center_x - amount_width // 2, start_y + 55), day_amount, font=font_small, fill=SMALL_COLOR)
             
             bbox = draw.textbbox((0, 0), week_label, font=font_label)
             label_width = bbox[2] - bbox[0]
@@ -288,7 +333,7 @@ def generate_image(spending, output_path='display.png'):
             
             bbox = draw.textbbox((0, 0), week_amount, font=font_medium)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, week_y + 35), week_amount, font=font_medium, fill=MEDIUM_COLOR)
+            draw.text((center_x - amount_width // 2, week_y + 55), week_amount, font=font_medium, fill=MEDIUM_COLOR)
             
             bbox = draw.textbbox((0, 0), month_label, font=font_label)
             label_width = bbox[2] - bbox[0]
@@ -296,7 +341,7 @@ def generate_image(spending, output_path='display.png'):
             
             bbox = draw.textbbox((0, 0), month_amount, font=font_large)
             amount_width = bbox[2] - bbox[0]
-            draw.text((center_x - amount_width // 2, month_y + 40), month_amount, font=font_large, fill=LARGE_COLOR)
+            draw.text((center_x - amount_width // 2, month_y + 60), month_amount, font=font_large, fill=LARGE_COLOR)
             
         except Exception as e:
             print(f"Could not load character image: {e}")
