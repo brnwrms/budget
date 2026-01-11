@@ -31,7 +31,7 @@ EXCLUDED_CATEGORIES = [
     'Bank Fees', 'Interest', 'Tax'
 ]
 
-EXCLUDED_TRANSACTION_TYPES = ['special', 'unresolved']
+EXCLUDED_TRANSACTION_TYPES = []
 
 
 def get_plaid_client():
