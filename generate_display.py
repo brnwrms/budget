@@ -403,7 +403,7 @@ def generate_image(spending, weather=None, output_path='display.png'):
             char_gray = char_img.convert('L')
             char_alpha = char_img.split()[3]
             # 70% opacity
-            char_alpha = char_alpha.point(lambda x: int(x * 0.70))
+            char_alpha = char_alpha.point(lambda x: int(x * 0.90))
             
             char_x = (WIDTH - char_width) // 2
             char_y = HEIGHT - char_height + 32
