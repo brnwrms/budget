@@ -167,10 +167,7 @@ def fetch_transactions(client, access_token, days=35):
         access_token=access_token,
         start_date=start_date,
         end_date=end_date,
-        options=TransactionsGetRequestOptions(
-            count=500,
-            include_pending=True
-        )
+        options=TransactionsGetRequestOptions(count=500)
     )
     
     response = client.transactions_get(request)
@@ -188,6 +185,9 @@ def calculate_spending(transactions):
     month_total = 0.0
     
     for txn in transactions:
+        is_pending = txn.get('pending', False)
+        print(f"{txn['date']} | ${txn['amount']:.2f} | pending={is_pending} | {txn.get('name', '')[:30]}")
+        
         txn_date = txn['date']
         if isinstance(txn_date, str):
             txn_date = datetime.strptime(txn_date, '%Y-%m-%d').date()
