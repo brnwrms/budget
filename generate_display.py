@@ -167,7 +167,10 @@ def fetch_transactions(client, access_token, days=35):
         access_token=access_token,
         start_date=start_date,
         end_date=end_date,
-        options=TransactionsGetRequestOptions(count=500)
+        options=TransactionsGetRequestOptions(
+            count=500,
+            include_pending=True
+        )
     )
     
     response = client.transactions_get(request)
