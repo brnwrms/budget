@@ -3,6 +3,7 @@
 Budget Display Generator for Kindle
 """
 
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -34,6 +35,9 @@ EXCLUDED_CATEGORIES = [
 ]
 
 EXCLUDED_TRANSACTION_TYPES = []
+
+# Cache file for resilient display during Plaid outages
+CACHE_FILENAME = 'spending_cache.json'
 
 # Weather code to icon mapping
 # Icons are white-on-transparent, will be inverted to black
@@ -98,6 +102,83 @@ WEATHER_ICONS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Spending cache – persists last good data so the display never goes blank
+# ---------------------------------------------------------------------------
+
+def load_cache(cache_path):
+    """Load cached spending data from disk."""
+    try:
+        if cache_path.exists():
+            data = json.loads(cache_path.read_text())
+            # Validate structure
+            if all(k in data for k in ('spending', 'last_sync', 'transactions_through')):
+                return data
+    except Exception as e:
+        print(f"Cache read error: {e}")
+    return None
+
+
+def save_cache(cache_path, spending, transactions):
+    """Persist spending snapshot so future runs can fall back to it."""
+    now = datetime.now(TIMEZONE)
+    
+    # Find the most recent transaction date to record how fresh the data is
+    latest_txn_date = None
+    for txn in transactions:
+        txn_date = txn['date']
+        if isinstance(txn_date, str):
+            pass  # already a string
+        else:
+            txn_date = txn_date.isoformat()
+        if latest_txn_date is None or txn_date > latest_txn_date:
+            latest_txn_date = txn_date
+    
+    cache_data = {
+        'spending': spending,
+        'last_sync': now.isoformat(),
+        'transactions_through': latest_txn_date or now.date().isoformat(),
+    }
+    
+    try:
+        cache_path.write_text(json.dumps(cache_data, indent=2))
+        print(f"Cache saved: {cache_data}")
+    except Exception as e:
+        print(f"Cache write error: {e}")
+
+
+def is_spending_empty(spending):
+    """Check if Plaid returned no real spending data."""
+    return spending['day'] == 0 and spending['week'] == 0 and spending['month'] == 0
+
+
+def get_staleness_text(cache_data):
+    """Return a human-readable staleness indicator, or None if data is fresh."""
+    if not cache_data:
+        return None
+    
+    now = datetime.now(TIMEZONE)
+    through_str = cache_data.get('transactions_through', '')
+    
+    try:
+        through_date = datetime.fromisoformat(through_str).date() if 'T' in through_str else datetime.strptime(through_str, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return "stale data"
+    
+    days_stale = (now.date() - through_date).days
+    
+    if days_stale <= 1:
+        return None  # Fresh enough, don't show indicator
+    elif days_stale < 7:
+        return f"as of {days_stale}d ago"
+    else:
+        return f"as of {through_date.strftime('%b %-d')}"
+
+
+# ---------------------------------------------------------------------------
+# Weather
+# ---------------------------------------------------------------------------
+
 def get_weather():
     """Fetch current weather from Open-Meteo (free, no API key)"""
     try:
@@ -136,6 +217,10 @@ def get_weather_icon(weather_code, is_day, assets_dir):
         return icon_path
     return None
 
+
+# ---------------------------------------------------------------------------
+# Plaid
+# ---------------------------------------------------------------------------
 
 def get_plaid_client():
     env = os.getenv('PLAID_ENV', 'sandbox')
@@ -222,6 +307,10 @@ def calculate_spending(transactions):
     }
 
 
+# ---------------------------------------------------------------------------
+# Image generation
+# ---------------------------------------------------------------------------
+
 def format_amount(amount):
     if amount >= 1000:
         return f"${amount:,.0f}"
@@ -243,7 +332,7 @@ def download_font(url, path):
     return True
 
 
-def generate_image(spending, weather=None, output_path='display.png'):
+def generate_image(spending, weather=None, output_path='display.png', stale_text=None):
     script_dir = Path(__file__).parent
     font_dir = script_dir / 'fonts'
     font_dir.mkdir(exist_ok=True)
@@ -263,18 +352,21 @@ def generate_image(spending, weather=None, output_path='display.png'):
     MEDIUM_SIZE = 115
     LARGE_SIZE = 200
     WEATHER_SIZE = 42
+    STALE_SIZE = 28
     
     font_label = None
     font_small = None
     font_medium = None
     font_large = None
     font_weather = None
+    font_stale = None
     
     try:
         if font_path.exists():
             font_label = ImageFont.truetype(str(font_path), LABEL_SIZE)
             font_small = ImageFont.truetype(str(font_path), SMALL_SIZE)
             font_weather = ImageFont.truetype(str(font_path), WEATHER_SIZE)
+            font_stale = ImageFont.truetype(str(font_path), STALE_SIZE)
         if font_medium_path.exists():
             font_medium = ImageFont.truetype(str(font_medium_path), MEDIUM_SIZE)
         if font_semibold_path.exists():
@@ -296,6 +388,7 @@ def generate_image(spending, weather=None, output_path='display.png'):
                     font_medium = ImageFont.truetype(font_name, MEDIUM_SIZE)
                     font_large = ImageFont.truetype(font_name, LARGE_SIZE)
                     font_weather = ImageFont.truetype(font_name, WEATHER_SIZE)
+                    font_stale = ImageFont.truetype(font_name, STALE_SIZE)
                     break
         except Exception as e:
             print(f"System font loading failed: {e}")
@@ -306,6 +399,7 @@ def generate_image(spending, weather=None, output_path='display.png'):
         font_medium = font_label
         font_large = font_label
         font_weather = font_label
+        font_stale = font_label
     
     if font_small is None:
         font_small = font_label
@@ -315,6 +409,8 @@ def generate_image(spending, weather=None, output_path='display.png'):
         font_large = font_medium
     if font_weather is None:
         font_weather = font_label
+    if font_stale is None:
+        font_stale = font_label
     
     img = Image.new('L', (WIDTH, HEIGHT), color=232)
     draw = ImageDraw.Draw(img)
@@ -323,6 +419,7 @@ def generate_image(spending, weather=None, output_path='display.png'):
     SMALL_COLOR = 100
     MEDIUM_COLOR = 60
     LARGE_COLOR = 0
+    STALE_COLOR = 150
     
     # Draw weather in top right
     icon_x = 0
@@ -355,6 +452,11 @@ def generate_image(spending, weather=None, output_path='display.png'):
             draw = ImageDraw.Draw(img)
         
         draw.text((temp_x, 40), temp_str, font=font_weather, fill=100)
+    
+    # Draw stale indicator top-left if data is stale
+    if stale_text:
+        stale_padding = 40
+        draw.text((stale_padding, 44), stale_text, font=font_stale, fill=STALE_COLOR)
     
     center_x = WIDTH // 2
     start_y = 340
@@ -405,7 +507,7 @@ def generate_image(spending, weather=None, output_path='display.png'):
             
             char_gray = char_img.convert('L')
             char_alpha = char_img.split()[3]
-            # 70% opacity
+            # 90% opacity
             char_alpha = char_alpha.point(lambda x: int(x * 0.90))
             
             char_x = (WIDTH - char_width) // 2
@@ -441,6 +543,10 @@ def generate_image(spending, weather=None, output_path='display.png'):
                 
                 draw.text((temp_x, 40), temp_str, font=font_weather, fill=100)
             
+            # Redraw stale indicator
+            if stale_text:
+                draw.text((stale_padding, 44), stale_text, font=font_stale, fill=STALE_COLOR)
+            
             # Redraw budget text
             bbox = draw.textbbox((0, 0), day_label, font=font_label)
             label_width = bbox[2] - bbox[0]
@@ -474,7 +580,14 @@ def generate_image(spending, weather=None, output_path='display.png'):
     return output_path
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
+    script_dir = Path(__file__).parent
+    cache_path = script_dir / CACHE_FILENAME
+    
     # Fetch weather
     weather = get_weather()
     if weather:
@@ -482,6 +595,8 @@ def main():
     
     required_vars = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ACCESS_TOKEN']
     missing = [v for v in required_vars if not os.getenv(v)]
+    
+    stale_text = None
     
     if missing or not PLAID_AVAILABLE:
         print("Generating demo image with sample data...")
@@ -493,9 +608,24 @@ def main():
         transactions = fetch_transactions(client, access_token)
         spending = calculate_spending(transactions)
         print(f"Day: ${spending['day']:.0f}, Week: ${spending['week']:.0f}, Month: ${spending['month']:.0f}")
+        
+        if is_spending_empty(spending):
+            # Plaid returned nothing useful — fall back to cache
+            print("WARNING: Plaid returned zero spending. Checking cache...")
+            cached = load_cache(cache_path)
+            
+            if cached:
+                spending = cached['spending']
+                stale_text = get_staleness_text(cached)
+                print(f"Using cached data: {spending} ({stale_text})")
+            else:
+                print("No cache available. Display will show $0.")
+        else:
+            # Good data — update the cache
+            save_cache(cache_path, spending, transactions)
     
-    output_path = Path(__file__).parent / 'display.png'
-    generate_image(spending, weather, output_path)
+    output_path = script_dir / 'display.png'
+    generate_image(spending, weather, output_path, stale_text=stale_text)
 
 
 if __name__ == '__main__':
