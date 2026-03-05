@@ -581,48 +581,124 @@ def generate_image(spending, weather=None, output_path='display.png', stale_text
 
 
 # ---------------------------------------------------------------------------
+# Gmail transaction data
+# ---------------------------------------------------------------------------
+
+TRANSACTIONS_FILE = 'transactions.json'
+
+
+def load_gmail_transactions(txn_path):
+    """Load transactions from Gmail-sourced transactions.json."""
+    try:
+        if txn_path.exists():
+            data = json.loads(txn_path.read_text())
+            return data.get('transactions', [])
+    except Exception as e:
+        print(f"Error loading Gmail transactions: {e}")
+    return []
+
+
+def calculate_gmail_spending(transactions):
+    """Calculate spending totals from Gmail-sourced transaction list."""
+    today = datetime.now(TIMEZONE).date()
+    days_since_monday = today.weekday()
+    week_start = today - timedelta(days=days_since_monday)
+    month_start = today.replace(day=1)
+
+    day_total = 0.0
+    week_total = 0.0
+    month_total = 0.0
+
+    for txn in transactions:
+        try:
+            txn_date = datetime.strptime(txn['date'], '%Y-%m-%d').date()
+        except (ValueError, KeyError):
+            continue
+
+        amount = txn.get('amount', 0)
+        if amount <= 0:
+            continue
+
+        if txn_date < month_start:
+            continue
+
+        source = txn.get('source', '')
+        print(f"  {txn_date} | ${amount:.2f} | {source} | {txn.get('merchant', '')[:30]}")
+
+        if txn_date == today:
+            day_total += amount
+        if txn_date >= week_start:
+            week_total += amount
+        if txn_date >= month_start:
+            month_total += amount
+
+    return {
+        'day': day_total,
+        'week': week_total,
+        'month': month_total
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
     script_dir = Path(__file__).parent
     cache_path = script_dir / CACHE_FILENAME
+    txn_path = script_dir / TRANSACTIONS_FILE
     
     # Fetch weather
     weather = get_weather()
     if weather:
         print(f"Weather: {weather['temp']}F, code {weather['code']}")
     
-    required_vars = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ACCESS_TOKEN']
-    missing = [v for v in required_vars if not os.getenv(v)]
-    
     stale_text = None
+    spending = None
     
-    if missing or not PLAID_AVAILABLE:
-        print("Generating demo image with sample data...")
-        spending = {'day': 42, 'week': 412, 'month': 2847}
-    else:
-        client = get_plaid_client()
-        access_token = os.getenv('PLAID_ACCESS_TOKEN')
+    # --- Source 1: Gmail transactions (preferred) ---
+    gmail_txns = load_gmail_transactions(txn_path)
+    if gmail_txns:
+        print(f"Gmail: {len(gmail_txns)} transactions loaded")
+        spending = calculate_gmail_spending(gmail_txns)
+        print(f"Gmail spending — Day: ${spending['day']:.0f}, Week: ${spending['week']:.0f}, Month: ${spending['month']:.0f}")
         
-        transactions = fetch_transactions(client, access_token)
-        spending = calculate_spending(transactions)
-        print(f"Day: ${spending['day']:.0f}, Week: ${spending['week']:.0f}, Month: ${spending['month']:.0f}")
+        if not is_spending_empty(spending):
+            # Good Gmail data — save to cache too
+            save_cache(cache_path, spending, [
+                {'date': t['date']} for t in gmail_txns
+            ])
+    
+    # --- Source 2: Plaid (fallback) ---
+    if spending is None or is_spending_empty(spending):
+        required_vars = ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ACCESS_TOKEN']
+        missing = [v for v in required_vars if not os.getenv(v)]
         
-        if is_spending_empty(spending):
-            # Plaid returned nothing useful — fall back to cache
-            print("WARNING: Plaid returned zero spending. Checking cache...")
-            cached = load_cache(cache_path)
+        if not missing and PLAID_AVAILABLE:
+            print("Trying Plaid...")
+            client = get_plaid_client()
+            access_token = os.getenv('PLAID_ACCESS_TOKEN')
             
-            if cached:
-                spending = cached['spending']
-                stale_text = get_staleness_text(cached)
-                print(f"Using cached data: {spending} ({stale_text})")
-            else:
-                print("No cache available. Display will show $0.")
+            transactions = fetch_transactions(client, access_token)
+            plaid_spending = calculate_spending(transactions)
+            print(f"Plaid spending — Day: ${plaid_spending['day']:.0f}, Week: ${plaid_spending['week']:.0f}, Month: ${plaid_spending['month']:.0f}")
+            
+            if not is_spending_empty(plaid_spending):
+                spending = plaid_spending
+                save_cache(cache_path, spending, transactions)
+    
+    # --- Source 3: Cache (last resort) ---
+    if spending is None or is_spending_empty(spending):
+        print("WARNING: No fresh data from Gmail or Plaid. Checking cache...")
+        cached = load_cache(cache_path)
+        
+        if cached:
+            spending = cached['spending']
+            stale_text = get_staleness_text(cached)
+            print(f"Using cached data: {spending} ({stale_text})")
         else:
-            # Good data — update the cache
-            save_cache(cache_path, spending, transactions)
+            print("No cache available. Display will show $0.")
+            spending = {'day': 0, 'week': 0, 'month': 0}
     
     output_path = script_dir / 'display.png'
     generate_image(spending, weather, output_path, stale_text=stale_text)
