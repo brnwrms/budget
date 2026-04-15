@@ -50,11 +50,15 @@ AUTO_WITHDRAWAL_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL
 )
 
-# Credit card transaction pattern (placeholder — update once we see the email)
+# Credit card transaction pattern (Fiserv alerts via SchoolsFirst)
+# "Pending charge for $3.75 on 04/15 11:50 CDT at 365 VEND, TROY, MI
+#  for Standard/Classic Credit card ending in 0373."
 CC_PATTERN = re.compile(
-    r'credit\s+card\s+.*?transaction\s+.*?'
-    r'\$([0-9,]+\.\d{2})\s+'
-    r'.*?at\s+(.+?)\s+.*?on\s+(\d{2}/\d{2}/\d{4})',
+    r'Pending\s+charge\s+for\s+\$([0-9,]+\.\d{2})\s+'
+    r'on\s+(\d{2}/\d{2})\s+'
+    r'(\d{1,2}:\d{2})\s+\w+\s+'  # time + timezone (CDT, CST, etc.)
+    r'at\s+(.+?)\s+'
+    r'for\s+Standard/Classic\s+Credit\s+card',
     re.IGNORECASE | re.DOTALL
 )
 
@@ -140,19 +144,25 @@ def parse_auto_withdrawal(body, subject):
 
 
 def parse_cc_transaction(body, subject):
-    """Parse a credit card transaction alert. Placeholder — needs real sample."""
+    """Parse a Fiserv credit card transaction alert."""
     match = CC_PATTERN.search(body)
     if not match:
         return None
     
-    groups = match.groups()
-    amount_str = groups[0]
+    amount_str, date_str, time_str, merchant = match.groups()
     amount = float(amount_str.replace(',', ''))
-    merchant = groups[1].strip() if len(groups) > 1 else 'Credit Card Purchase'
-    date_str = groups[-1]
+    merchant = merchant.strip().rstrip(',')
     
+    # Date is MM/DD without year — assume current year,
+    # but handle year boundary (e.g., 12/31 seen in January)
+    now = datetime.now(TIMEZONE)
     try:
-        txn_date = datetime.strptime(date_str, '%m/%d/%Y').date()
+        month, day = date_str.split('/')
+        txn_date = now.replace(month=int(month), day=int(day)).date()
+        # If the parsed date is more than 30 days in the future,
+        # it's probably from last year
+        if (txn_date - now.date()).days > 30:
+            txn_date = txn_date.replace(year=now.year - 1)
     except ValueError:
         return None
     
@@ -161,7 +171,7 @@ def parse_cc_transaction(body, subject):
         'amount': amount,
         'merchant': merchant,
         'source': 'credit_card',
-        'time': None,
+        'time': time_str.strip(),
     }
 
 
@@ -193,7 +203,7 @@ def parse_alert_email(msg):
             txn['alert_type'] = subject.strip()
             return txn
     
-    if 'credit card' in subject_lower:
+    if 'transaction notification' in subject_lower or 'pending charge' in body.lower() or 'credit card' in subject_lower:
         txn = parse_cc_transaction(body, subject)
         if txn:
             txn['alert_type'] = subject.strip()
