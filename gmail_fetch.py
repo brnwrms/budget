@@ -23,8 +23,13 @@ from zoneinfo import ZoneInfo
 TIMEZONE = ZoneInfo('America/Los_Angeles')
 TRANSACTIONS_FILE = 'transactions.json'
 
-# SchoolsFirst alert sender
-ALERT_SENDER = 'alerts@schoolsfirstfcu.org'
+# SchoolsFirst alert senders (debit/auto-withdrawal alerts)
+# Fiserv CC alerts come from a different sender — since this is a
+# dedicated inbox, we search all emails and let the parsers sort it out
+ALERT_SENDERS = [
+    'alerts@schoolsfirstfcu.org',
+    # Fiserv CC sender TBD — searching all mail as fallback
+]
 
 # ---------------------------------------------------------------------------
 # Email parsing
@@ -41,12 +46,12 @@ DEBIT_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL
 )
 
-# Automatic withdrawal pattern (estimated — update once we see a real one)
-# "An Automatic Withdrawal ... in the amount of $XX.XX ... on MM/DD/YYYY"
+# Automatic withdrawal pattern (from real emails)
+# "An automatic withdrawal of $36.41 from xxxx43-70 for PAYPAL was made on 03/16/2026."
 AUTO_WITHDRAWAL_PATTERN = re.compile(
-    r'Automatic\s+Withdrawal\s+.*?'
-    r'in\s+the\s+amount\s+of\s+\$([0-9,]+\.\d{2})\s+'
-    r'.*?on\s+(\d{2}/\d{2}/\d{4})',
+    r'[Aa]n\s+automatic\s+withdrawal\s+of\s+\$([0-9,]+\.\d{2})\s+'
+    r'from\s+\S+\s+for\s+(.+?)\s+'
+    r'was\s+made\s+on\s+(\d{2}/\d{2}/\d{4})',
     re.IGNORECASE | re.DOTALL
 )
 
@@ -126,8 +131,9 @@ def parse_auto_withdrawal(body, subject):
     if not match:
         return None
     
-    amount_str, date_str = match.groups()
+    amount_str, merchant, date_str = match.groups()
     amount = float(amount_str.replace(',', ''))
+    merchant = merchant.strip()
     
     try:
         txn_date = datetime.strptime(date_str, '%m/%d/%Y').date()
@@ -137,7 +143,7 @@ def parse_auto_withdrawal(body, subject):
     return {
         'date': txn_date.isoformat(),
         'amount': amount,
-        'merchant': 'Automatic Withdrawal',
+        'merchant': merchant,
         'source': 'auto_withdrawal',
         'time': None,
     }
@@ -234,13 +240,14 @@ def fetch_alert_emails(mail, since_date=None, processed_ids=None):
     mail.select('INBOX')
     
     # Build search criteria
-    criteria = [f'FROM "{ALERT_SENDER}"']
+    # This is a dedicated inbox — search all mail and let parsers filter
+    criteria = []
     if since_date:
         # IMAP date format: DD-Mon-YYYY
         date_str = since_date.strftime('%d-%b-%Y')
         criteria.append(f'SINCE {date_str}')
     
-    search_query = '(' + ' '.join(criteria) + ')'
+    search_query = '(' + ' '.join(criteria) + ')' if criteria else 'ALL'
     print(f"IMAP search: {search_query}")
     
     status, message_ids = mail.search(None, search_query)
