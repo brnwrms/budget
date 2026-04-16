@@ -30,11 +30,6 @@ jobs:
           restore-keys: |
             transactions-
       
-      # --- ONE-TIME: Remove this step and backfill.py after first successful run ---
-      - name: Backfill April CC transactions
-        run: |
-          python backfill.py
-      
       - name: Fetch Gmail transactions
         env:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
