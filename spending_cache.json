@@ -1,9 +1,9 @@
 {
   "spending": {
-    "day": 9.99,
-    "week": 9.99,
-    "month": 1990.12
+    "day": 5.0,
+    "week": 5.0,
+    "month": 5.0
   },
-  "last_sync": "2026-06-30T22:26:49.481180-07:00",
-  "transactions_through": "2026-06-30"
+  "last_sync": "2026-07-01T08:46:47.714015-07:00",
+  "transactions_through": "2026-07-01"
 }
